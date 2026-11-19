@@ -1,0 +1,38 @@
+{
+    "config": {
+        "EON": "\n",
+        "EOF": "EOF"
+    },
+    "lexer": {
+        "tab_size": 4,
+        "error_policy": {
+            "unknown_token": "exit",
+            "unclosed_string": "exit",
+            "invalid_char": "exit",
+            "unknown_operator": "warn"
+        },
+        "keyword": {},
+        "operator": {
+            "+": "PLUS", "-": "MINUS", "*": "MUL", "/": "DIV",
+            "=": "ASSIGN", "==": "EQ", "!=": "NEQ",
+            ">": "GT", "<": "LT", ">=": "GTE", "<=": "LTE"
+        },
+        "symbol": {
+            "(": "LPAREN", ")": "RPAREN",
+            "{": "LBRACE", "}": "RBRACE",
+            "[": "LBRACKET", "]": "RBRACKET",
+            ";": "SEMICOLON", ",": "COMMA", ":": "COLON"
+        },
+        "string_modes": {
+            "rawstr": { "open": "##", "close": "##", "token": "RAWSTRING", "escape": { "n": "\n" } }
+        }
+    },
+    "grammar": {
+        "statements": {
+            "Print": ["print","%String"]
+        },
+        "exprs": {
+            "String": ["collect:string"]
+        }
+    }
+}

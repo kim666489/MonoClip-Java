@@ -1,0 +1,28 @@
+{
+  "tab_size": 4,
+  "error_policy": {
+    "unknown_token": "exit",
+    "unclosed_string": "exit",
+    "invalid_char": "exit",
+    "unknown_operator": "warn"
+  },
+  "keyword": {
+    "int": "INT", "float": "FLOAT", "double": "DOUBLE",
+    "string": "STRING", "char": "CHAR", "bool": "BOOL", "auto": "AUTO",
+    "true": "BOOL", "false": "BOOL"
+  },
+  "operator": {
+    "+": "PLUS", "-": "MINUS", "*": "MUL", "/": "DIV",
+    "=": "ASSIGN", "==": "EQ", "!=": "NEQ",
+    ">": "GT", "<": "LT", ">=": "GTE", "<=": "LTE"
+  },
+  "symbol": {
+    "(": "LPAREN", ")": "RPAREN",
+    "{": "LBRACE", "}": "RBRACE",
+    "[": "LBRACKET", "]": "RBRACKET",
+    ";": "SEMICOLON", ",": "COMMA", ":": "COLON"
+  },
+  "string_modes": {
+    "rawstr": { "open": "##", "close": "##", "token": "RAWSTRING", "escape": { "n": "\n" } }
+  }
+}
