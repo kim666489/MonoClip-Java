@@ -23,29 +23,65 @@
 ```java
 MonoClip p = new MonoClip();
 p.DebugAst_Enable = true;                 // พิมพ์ AST เป็นต้นไม้หลัง parse
-p.loadRulePath(Path.of("rule.json"));     // หรือ p.loadRuleString(jsonText)
 
-p.parse("say 1 + 2 * 3\n");
+try {
+    p.loadRulePath(Path.of("rule.json")); // หรือ p.loadRuleString(jsonText)
+    p.parse("say 1 + 2 * 3\n");
 
-System.out.println(p.dumpAstTree());      // ต้นไม้
-System.out.println(p.dumpAstJson());      // JSON
-for (MonoClip.Nodes n : p.Ast) {          // เดินเอง
-    System.out.println(n.name + " " + n.args);
+    System.out.println(p.dumpAstTree());  // ต้นไม้
+    System.out.println(p.dumpAstJson());  // JSON
+    for (MonoClip.Nodes n : p.Ast) {      // เดินเอง
+        System.out.println(n.name + " " + n.args);
+    }
+} catch (MonoClip.MonoClipException e) {
+    System.err.println(e.getMessage());   // [SyntaxError] Unexpected token 'x' InLine 3:5
 }
 ```
 
 | เมธอด / ฟิลด์ | ความหมาย |
 |---|---|
-| `loadRulePath(Path)` | โหลด rule จากไฟล์ (ไม่เจอไฟล์ → เตือนแล้วจบโปรแกรม ยกเว้นเปิด `LoadDefRuleIfRuleFileNotFound_Enable`) |
-| `loadRuleString(String)` | โหลด rule จากสตริง JSON |
+| `loadRulePath(Path)` | โหลด rule จากไฟล์ · ไม่เจอไฟล์ → โยน `MonoClipException` (`RuleError`) ยกเว้นเปิด `LoadDefRuleIfRuleFileNotFound_Enable` (จะเตือนแล้วใช้ `DefRule` แทน) · อ่านไฟล์ไม่ได้ → `IOException` |
+| `loadRuleString(String)` | โหลด rule จากสตริง JSON (ผิด → `RuleError`) |
 | `loadRuleDef()` | โหลด `DefRule` ที่ฝังในคลาส |
-| `parse(String code)` | lex + parse ผลลัพธ์อยู่ที่ `Ast` (เรียกซ้ำได้ มี `cleaning()` ในตัว) |
+| `parse(String code)` | lex + parse ผลลัพธ์อยู่ที่ `Ast` (เรียกซ้ำได้ มี `cleaning()` ในตัว) · ผิด → โยน `MonoClipException` |
 | `Ast` | `List<Nodes>` ของ statement ระดับบนสุด |
+| `Warnings` | `List<String>` คำเตือนของการ parse/eval รอบล่าสุด |
+| `WarningPrint_Enable` | `true` (ค่าเริ่มต้น) = พิมพ์คำเตือนลง stderr ด้วย · ตั้ง `false` ถ้าอยากอ่านจาก `Warnings` เอง |
 | `Eval(Object)` | คำนวณ `Val` / `Binary` / `Unary` |
 | `dumpAstTree()` / `dumpAstJson()` | debug |
 | `DebugAst_Enable` | พิมพ์ต้นไม้อัตโนมัติท้าย `parse` |
 
-> ถ้า syntax ผิด จะพิมพ์ `[SyntaxError] Unexpected ... InLine บรรทัด:คอลัมน์` แล้ว `System.exit(1)`
+## จัดการข้อผิดพลาด
+
+MonoClip **ไม่เรียก `System.exit` แล้ว** ทุกข้อผิดพลาดโยน `MonoClip.MonoClipException` (unchecked, extends `RuntimeException`) ให้โปรแกรมที่เรียกใช้ตัดสินใจเอง
+
+| ฟิลด์ | ความหมาย |
+|---|---|
+| `kind` | ชนิด: `SyntaxError` · `IndentationError` · `RuleError` · `JsonError` · `MonoClip` (config/grammar ผิด) |
+| `detail` | ข้อความล้วนๆ ไม่มี prefix/ตำแหน่ง |
+| `line`, `col` | ตำแหน่งใน source (`0` = ไม่มีตำแหน่ง เช่น error ตอนโหลด rule) |
+| `code` | รหัส (เดิมคือ exit code) |
+| `getMessage()` | รูปแบบเดิม เช่น `[SyntaxError] Unexpected token 'x' InLine 3:5` |
+
+```java
+try {
+    p.parse(src);
+} catch (MonoClip.MonoClipException e) {
+    switch (e.kind) {
+        case "SyntaxError"      -> System.err.printf("syntax error at %d:%d: %s%n", e.line, e.col, e.detail);
+        case "IndentationError" -> System.err.printf("indent error at %d:%d: %s%n", e.line, e.col, e.detail);
+        default                 -> System.err.println(e.getMessage());
+    }
+    System.exit(e.code);                  // อยากได้พฤติกรรมเดิม ก็ทำเองตรงนี้
+}
+```
+
+ข้อควรรู้:
+
+- หลังโยน exception `p.Ast` จะมี statement ที่ parse สำเร็จก่อนจุดที่ผิดค้างอยู่ (ใช้ดูได้ แต่ไม่ครบ)
+- เรียก `parse()` ใหม่ได้เลย (ล้างสถานะเอง) ไม่ต้องสร้าง `MonoClip` ใหม่
+- `loadRule*` ล้มเหลวกลางทางอาจทำให้ rule อยู่ในสถานะครึ่งๆ กลางๆ → โหลด rule ให้สำเร็จก่อนใช้ `parse`
+- ข้อผิดพลาดจาก `MonoLexer` ไม่ถูกแปลง ถ้า lexer โยน exception ของตัวเองก็จะหลุดออกมาตามเดิม (ถ้าต้องการให้ห่อเป็น `MonoClipException` ด้วยก็ครอบ `lexer.run()` ใน `parse` ได้)
 
 ## โครงสร้าง rule.json
 
@@ -405,7 +441,7 @@ if 1 < 2:
 ## Debug / แก้ปัญหา
 
 - เปิด `DebugAst_Enable = true` ดูต้นไม้ AST ทันที
-- ตำแหน่ง error ดูที่ `InLine บรรทัด:คอลัมน์` (ชี้ที่ token ที่ไกลที่สุดที่ parse ถึง)
+- ตำแหน่ง error ดูที่ `e.line` / `e.col` หรือ `InLine บรรทัด:คอลัมน์` ใน message (ชี้ที่ token ที่ไกลที่สุดที่ parse ถึง)
 - `Statement '...' consumed no tokens` → กฎ statement ไม่กิน token เลย (เช่นมีแต่ `opt`/`many`) ต้องเพิ่ม element ที่กินจริง
 - `Grammar recursion too deep` → rule เรียกตัวเองวนโดยไม่กิน token (left recursion) ให้ใช้ `pratt` หรือ `many/sep` แทน
 - `Unknown grammar rule '%X'` → ชื่อใน `%X` ไม่มีใน `pratt` / `exprs` / `statements`
@@ -417,5 +453,4 @@ if 1 < 2:
 ## ข้อจำกัดปัจจุบัน
 
 - `Execute()` ยังเป็นโครง (รองรับแค่ `Print`) และถูกคอมเมนต์ไว้ใน `Statements()` — ตอนนี้ได้ AST อย่างเดียว
-- ข้อผิดพลาดส่วนใหญ่เรียก `System.exit` แทนการ throw exception
 - ความลึกของ rule/statement/value จำกัดที่ 256 ชั้น

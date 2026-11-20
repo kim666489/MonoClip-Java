@@ -21,6 +21,10 @@ public class MonoClip {
     public List<Nodes> Ast = new ArrayList<>();
     public boolean DebugAst_Enable = false;
 
+    // ---- คำเตือน (Warning) : เก็บไว้ใน Warnings และพิมพ์ลง stderr ถ้า WarningPrint_Enable = true ----
+    public final List<String> Warnings = new ArrayList<>();
+    public boolean WarningPrint_Enable = true;
+
     // ---- ข้อมูลที่โหลดจาก JSON ----
     private final Set<String> KeywordAll = new HashSet<>();
     private final Map<String, Set<String>> KeywordGroups = new HashMap<>();
@@ -47,6 +51,39 @@ public class MonoClip {
     private final Map<String, List<Object>> shorthandCache = new HashMap<>();
 
     private static final Object NOPE = new Object();   // "parse ไม่ได้" (แยกจากค่า null ที่เป็นค่าจริง)
+
+    /**
+     * Exception ของ MonoClip ทุกชนิด (unchecked)
+     *   kind   : ชนิดข้อผิดพลาด  SyntaxError | IndentationError | RuleError | JsonError | MonoClip
+     *   detail : ข้อความล้วนๆ (ไม่มี prefix / ตำแหน่ง)
+     *   line,col : ตำแหน่งใน source (0 = ไม่มีตำแหน่ง เช่น error ตอนโหลด rule)
+     *   code   : รหัส (เดิมคือ exit code)
+     *   getMessage() ได้ข้อความรูปแบบเดิม  "[SyntaxError] Unexpected token 'x' InLine 3:5"
+     */
+    public static class MonoClipException extends RuntimeException {
+        private static final long serialVersionUID = 1L;
+        public final String kind;
+        public final String detail;
+        public final int line, col, code;
+
+        public MonoClipException(String kind, String detail, int line, int col, int code) {
+            super(format(kind, detail, line, col));
+            this.kind = kind;
+            this.detail = detail;
+            this.line = line;
+            this.col = col;
+            this.code = code;
+        }
+
+        public MonoClipException(String kind, String detail, int line, int col, int code, Throwable cause) {
+            this(kind, detail, line, col, code);
+            initCause(cause);
+        }
+
+        private static String format(String kind, String detail, int line, int col) {
+            return "[" + kind + "] " + detail + (line > 0 ? " InLine " + line + ":" + col : "");
+        }
+    }
 
     /** token ของเราเอง (คัดลอกจาก MonoLexer.Token + ข้อมูลเยื้อง) รวม token สังเคราะห์ NEWLINE/INDENT/DEDENT */
     public static final class Tok {
@@ -121,18 +158,28 @@ public class MonoClip {
         if (this.pc > this.farPc) this.farPc = this.pc;
     }
 
-    private void Warning(String name, String content) {
-        System.err.println("[Warning] (%s) %s InLine %s:%s".formatted(name, content, this.Current().line, this.Current().col));
+    /** ตำแหน่ง token ปัจจุบัน {line, col} (0,0 ถ้ายังไม่มี token เช่นตอนโหลด rule) */
+    private int[] pos() {
+        if (this.Tokens == null || this.Tokens.isEmpty()) return new int[]{0, 0};
+        Tok t = Current();
+        return new int[]{t.line, t.col};
     }
 
+    private void Warning(String name, String content) {
+        int[] p = pos();
+        String msg = "[Warning] (" + name + ") " + content + (p[0] > 0 ? " InLine " + p[0] + ":" + p[1] : "");
+        Warnings.add(msg);
+        if (WarningPrint_Enable) System.err.println(msg);
+    }
+
+    /** โยน MonoClipException ที่ตำแหน่ง token ปัจจุบัน (ไม่ return) */
     private void Error(String name, String content, int code) {
-        System.err.println("[%s] %s InLine %s:%s".formatted(name, content, this.Current().line, this.Current().col));
-        System.exit(code);
+        int[] p = pos();
+        throw new MonoClipException(name, content, p[0], p[1], code);
     }
 
     private static void configError(String msg) {
-        System.err.println("[MonoClip] " + msg);
-        System.exit(1);
+        throw new MonoClipException("MonoClip", msg, 0, 0, 1);
     }
 
     private static List<Object> grp(Object... a) {
@@ -252,8 +299,7 @@ public class MonoClip {
     }
 
     private void layoutError(String msg, Tok t) {
-        System.err.println("[IndentationError] " + msg + " InLine " + t.line + ":" + t.col);
-        System.exit(1);
+        throw new MonoClipException("IndentationError", msg, t.line, t.col, 1);
     }
 
     private int indentOf(String[] lines, Tok t) {
@@ -1017,8 +1063,10 @@ public class MonoClip {
                     try {
                         val = Json.parse(st.value);
                         consume();
+                    } catch (MonoClipException e) {
+                        throw e;
                     } catch (RuntimeException e) {
-                        Error("JsonError", String.valueOf(e.getMessage()), 1);
+                        throw new MonoClipException("JsonError", String.valueOf(e.getMessage()), st.line, st.col, 1, e);
                     }
                 } else if (!text) {
                     val = autoValue(true, 0);
@@ -1775,6 +1823,26 @@ public class MonoClip {
         loadAuto();
     }
 
+    /** parse ข้อความ rule แล้ว apply — ทุกข้อผิดพลาดกลายเป็น MonoClipException("RuleError") */
+    private void loadRuleText(String text, String source) {
+        Object root;
+        try {
+            root = Json.parse(text);
+        } catch (RuntimeException e) {
+            throw new MonoClipException("RuleError", "invalid JSON in " + source + ": " + e.getMessage(), 0, 0, 1, e);
+        }
+        if (!(root instanceof Json.JsonObject)) {
+            throw new MonoClipException("RuleError", source + " must be a JSON object", 0, 0, 1);
+        }
+        try {
+            applyRule((Json.JsonObject) root);
+        } catch (MonoClipException e) {
+            throw e;
+        } catch (RuntimeException e) {
+            throw new MonoClipException("RuleError", "invalid rule in " + source + ": " + e, 0, 0, 1, e);
+        }
+    }
+
     private void loadTokenTypes() {
         TypeMap.clear();
         for (String[] row : DEFAULT_TYPES) {
@@ -1850,24 +1918,29 @@ public class MonoClip {
         }
     }
 
+    /**
+     * โหลด rule จากไฟล์
+     * @throws MonoClipException("RuleError") ถ้าไม่พบไฟล์ (และไม่ได้เปิด LoadDefRuleIfRuleFileNotFound_Enable) หรือ rule ผิด
+     * @throws java.io.IOException ถ้าอ่านไฟล์ไม่ได้
+     */
     public void loadRulePath(Path rulePath) throws Exception {
         if (!Files.exists(rulePath) || Files.isDirectory(rulePath)) {
-            System.err.println("[Warning] (MonoClip) GrammarRule file not found");
             if (LoadDefRuleIfRuleFileNotFound_Enable) {
-                applyRule((Json.JsonObject) Json.parse(DefRule));
+                Warning("MonoClip", "GrammarRule file not found: " + rulePath + " (using default rule)");
+                loadRuleText(DefRule, "default rule");
                 return;
             }
-            System.exit(0);
+            throw new MonoClipException("RuleError", "GrammarRule file not found: " + rulePath, 0, 0, 1);
         }
-        applyRule((Json.JsonObject) Json.parse(Files.readString(rulePath)));
+        loadRuleText(Files.readString(rulePath), rulePath.toString());
     }
 
     public void loadRuleString(String rule) {
-        applyRule((Json.JsonObject) Json.parse(rule));
+        loadRuleText(rule, "rule string");
     }
 
     public void loadRuleDef() {
-        applyRule((Json.JsonObject) Json.parse(DefRule));
+        loadRuleText(DefRule, "default rule");
     }
 
     // =========================================================================
@@ -1998,14 +2071,20 @@ public class MonoClip {
         this.farPc = 0;
         this.stmtDepth = 0;
         this.Ast.clear();
+        this.Warnings.clear();
     }
 
     private static int toInt(Object o) {
         try { return Integer.parseInt(String.valueOf(o)); } catch (NumberFormatException e) { return 0; }
     }
 
+    /**
+     * lex + parse (เรียกซ้ำได้ มี cleaning() ในตัว)
+     * @throws MonoClipException ถ้า syntax / indentation / rule ผิด — ผลที่ parse ได้ก่อนหน้าจะค้างอยู่ใน Ast
+     */
     public int parse(String Code) {
         this.cleaning();
+        this.Tokens = null;                            // ให้ตำแหน่ง error ตอน lex เป็น 0:0 ไม่อิงของรอบก่อน
         MonoLexer.Config cfg = MonoLexer.loadConfig(LexerRule);
         MonoLexer lexer = new MonoLexer(Code, cfg);
 
@@ -2028,7 +2107,7 @@ public class MonoClip {
         return 0;
     }
 
-    MonoClip() {
+    public MonoClip() {
 
     }
 }
