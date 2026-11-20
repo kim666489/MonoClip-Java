@@ -6,7 +6,7 @@ public class Main {
             MonoClip mc = new MonoClip();
             mc.loadRulePath(Paths.get("./example/Rule.json"));
             mc.DebugAst_Enable = true;
-            mc.parse("print \"Hello World\"");
+            mc.parse("print(\"Hello World\")");
         } catch (Exception e) {
             e.printStackTrace();
         }

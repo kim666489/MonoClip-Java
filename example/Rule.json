@@ -29,7 +29,7 @@
     },
     "grammar": {
         "statements": {
-            "Print": ["print","%String"]
+            "Print": [["choice","print","puts","say"],"(","%String",")"]
         },
         "exprs": {
             "String": ["collect:string"]
