@@ -13,7 +13,28 @@ public class MonoClip {
     public Json.JsonObject ClassRule;    // grammar.classes : custom class / symbol
     public Json.JsonObject LexerRule;
     public boolean LoadDefRuleIfRuleFileNotFound_Enable = false;
-    private String DefRule = "";
+    /** rule เริ่มต้น (เครื่องคิดเลขแบบบรรทัดต่อบรรทัด: let x = ..., say ...) ใช้เมื่อไม่มีไฟล์ rule */
+    private String DefRule =
+        "{\n"
+      + "  \"layout\": {\"mode\": \"newline\"},\n"
+      + "  \"grammar\": {\n"
+      + "    \"keywords\": [\"let\", \"say\"],\n"
+      + "    \"pratt\": {\n"
+      + "      \"Expr\": {\n"
+      + "        \"primary\": [\"choice\", \"val:number\", \"val:string\", \"val:ident\"],\n"
+      + "        \"group\": [\"(\", \")\"],\n"
+      + "        \"levels\": [[\"or\", \"||\"], [\"and\", \"&&\"], [\"==\", \"!=\", \"<\", \">\", \"<=\", \">=\"],\n"
+      + "                   [\"+\", \"-\"], [\"*\", \"/\", \"%\"], {\"ops\": [\"**\"], \"assoc\": \"right\"}],\n"
+      + "        \"prefix\": [\"-\", \"!\", \"not\"],\n"
+      + "        \"prefixPrec\": 5\n"
+      + "      }\n"
+      + "    },\n"
+      + "    \"statements\": {\n"
+      + "      \"Let\": [\"let\", \"collect:ident\", \"=\", \"%Expr\", \"@nl\"],\n"
+      + "      \"Say\": [\"say\", \"%Expr\", \"@nl\"]\n"
+      + "    }\n"
+      + "  }\n"
+      + "}\n";
     private List<Tok> Tokens;
     private int pc = 0;
     private int farPc = 0;
@@ -1807,7 +1828,7 @@ public class MonoClip {
     private void applyRule(Json.JsonObject main) {
         this.MainRule = main;
         this.GrammarRule = main.getJsonObject("grammar");
-        this.LexerRule = main.getJsonObject("lexer");
+        this.LexerRule = main.has("lexer") ? main.getJsonObject("lexer") : new Json.JsonObject();
         this.StatementRule = GrammarRule.getJsonObject("statements");
         this.ExprRule = GrammarRule.has("exprs") ? GrammarRule.getJsonObject("exprs") : new Json.JsonObject();
         this.PrattRule = GrammarRule.has("pratt") ? GrammarRule.getJsonObject("pratt") : new Json.JsonObject();
@@ -2110,4 +2131,4 @@ public class MonoClip {
     public MonoClip() {
 
     }
-}
+}
